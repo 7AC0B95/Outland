@@ -1,0 +1,9 @@
+# Outland Core Module
+# This module contains the core functionality and data for the Outland survival project.
+
+set(MOD_OUTLAND_CORE_SQL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sql)
+
+# World database
+set(MOD_OUTLAND_CORE_WORLD_SQL
+    ${MOD_OUTLAND_CORE_SQL_DIR}/world/001_outland_initial_spawn_settings.sql
+)
