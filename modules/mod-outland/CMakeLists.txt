@@ -11,12 +11,12 @@ set(MOD_OUTLAND_CONFIG
 # This section instructs the build system to compile our C++ loader file,
 # which resolves the linker error.
 set(MOD_OUTLAND_SOURCES
-    ${MOD_OUTLAND_ROOT}/src/MP_loader.cpp
+    ${MOD_OUTLAND_ROOT}/src/mod-outland_loader.cpp
 )
 
 # --- SQL Data ---
 # World
 set(MOD_OUTLAND_WORLD_SQL
-    ${MOD_OUTLAND_ROOT}/sql/world/001_outland_initial_spawn_settings.sql
-    ${MOD_OUTLAND_ROOT}/sql/world/002_outland_clean_world_spawns.sql
+    ${MOD_OUTLAND_ROOT}data/sql/db_world/001_outland_initial_spawn_settings.sql
+    ${MOD_OUTLAND_ROOT}data/sql/db_world/002_outland_clean_world_spawns.sql
 )
