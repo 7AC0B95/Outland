@@ -1,4 +1,4 @@
-(v2 - Foreign Key Fix)
+-- [Outland] (v2 - Foreign Key Fix)
 -- Description: Removes all default creature and gameobject spawns from the world,
 -- and severs all links between entities and quests to create a blank slate.
 
