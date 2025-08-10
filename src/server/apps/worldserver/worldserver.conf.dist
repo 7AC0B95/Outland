@@ -1984,7 +1984,7 @@ StartHeroicPlayerLevel = 55
 #                     1 - (Show intro only for first character of selected race)
 #                     2 - (Disable intro for all classes)
 
-SkipCinematics = 2
+SkipCinematics = 0
 
 #
 #    StartPlayerMoney
