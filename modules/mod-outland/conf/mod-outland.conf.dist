@@ -1,0 +1,9 @@
+#
+# Configuration for the Outland Project Module
+#
+
+[worldserver]
+
+# Prevents buggy intros in case of custom start location coordinates.
+# 2 = Disable intro for all classes
+SkipCinematics = 2

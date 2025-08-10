@@ -1,10 +1,22 @@
-# Outland Core Module
-# This module contains the core functionality and data for the Outland survival project.
+# Outland Project Core Module
 
-set(MOD_OUTLAND_CORE_SQL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sql)
+set(MOD_OUTLAND_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
-# World database
-set(MOD_OUTLAND_CORE_WORLD_SQL
-    ${MOD_OUTLAND_CORE_SQL_DIR}/world/001_outland_initial_spawn_settings.sql
-    ${MOD_OUTLAND_CORE_SQL_DIR}/world/002_outland_clean_world_spawns.sql
+# --- Config Data ---
+set(MOD_OUTLAND_CONFIG
+    ${MOD_OUTLAND_ROOT}/conf/mod-outland.conf.dist
+)
+
+# --- Source Files ---
+# This section instructs the build system to compile our C++ loader file,
+# which resolves the linker error.
+set(MOD_OUTLAND_SOURCES
+    ${MOD_OUTLAND_ROOT}/src/MP_loader.cpp
+)
+
+# --- SQL Data ---
+# World
+set(MOD_OUTLAND_WORLD_SQL
+    ${MOD_OUTLAND_ROOT}/sql/world/001_outland_initial_spawn_settings.sql
+    ${MOD_OUTLAND_ROOT}/sql/world/002_outland_clean_world_spawns.sql
 )
