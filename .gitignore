@@ -97,6 +97,11 @@ local.properties
 #  put below your custom ignore rules
 #  for example , if you want to include a
 #  module directly in repositoryyou can do:
+
+# Ignore log files in project root
+Auth.log
+Errors.log
+Server.log
 #
 #  !modules/yourmodule
 #
