@@ -1,0 +1,7 @@
+-- Outland Hunger: per-character persistence table
+CREATE TABLE IF NOT EXISTS `character_hunger` (
+  `guid` INT UNSIGNED NOT NULL,
+  `hunger` TINYINT UNSIGNED NOT NULL DEFAULT 100,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`guid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

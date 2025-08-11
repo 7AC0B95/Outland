@@ -1,70 +1,336 @@
--- =================================================================
 --
---  Outland :: Core Survival Systems
---  File: outland_survival.lua
+--  Outland Hunger System (Phase 1)
+--  - Per-character persistent hunger with offline decay (optional)
+--  - Context-aware drain (idle/moving/combat/resting) and gates (BG/Arena/flight/ghost)
+--  - Threshold messaging and optional auras
+--  - Basic food consumption hooks for common food items
+--  - Simple .hunger command (player + GM tools)
 --
--- =================================================================
 
---[[ Game Balance Constants ]]--
--- These are at the top for easy tweaking.
-local TICK_INTERVAL_SECONDS = 5  -- How often hunger depletes (in seconds).
-local HUNGER_PER_TICK = 1         -- How much hunger is lost per tick.
-local MAX_HUNGER = 100            -- The maximum hunger a player can have.
-local HUNGER_DATA_KEY = "outland_hunger" -- The key for storing player data.
+--[[ Configuration ]]--
+local Hunger = {
+    ENABLED = true,
+
+    -- Ticking / bounds
+    TICK_MS = 5000,
+    MAX = 100,
+    START = 100,
+
+    -- Drain per tick. Positive numbers drain hunger.
+    RATES = {
+        base = 0.5,
+        moving = 0.5,   -- extra drain when moving
+        combat = 1.0,   -- extra drain when in combat
+        resting = -0.4, -- reduce drain when resting (can go as low as REST_MIN)
+        REST_MIN = 0.1, -- minimum drain while resting
+    },
+
+    -- Optional offline decay when a player is logged out (per hour)
+    OFFLINE_DECAY_PER_HOUR = 0, -- set to >0 to slowly drain while offline
+
+    -- Thresholds for messaging/effects
+    THRESHOLDS = {
+        peckish = 70,
+        hungry = 40,
+        starving = 15,
+    },
+
+    -- Optional auras to apply at thresholds (set to nil to disable)
+    SPELLS = {
+        peckish = nil,
+        hungry = nil,
+        starving = nil,
+    },
+
+    -- Optional movement speed penalty at starving (applies to run walk movement)
+    SPEED_PENALTY = { enabled = false, starving = 0.85 }, -- 85% of normal
+
+    -- Context gates
+    GATES = {
+        disableInBG = true,
+        disableInArena = true,
+        disableInFlight = true,
+        disableWhileGhost = true,
+    },
+
+    -- Messaging
+    MESSAGES = {
+        peckish = "You feel a bit peckish.",
+        hungry = "You're getting hungry.",
+        starving = "You're starving! Find food soon.",
+        restored = function(amount)
+            return ("You eat and restore %d hunger."):format(amount)
+        end,
+        show = function(value, max)
+            return ("Hunger: %d/%d"):format(value, max)
+        end,
+    },
+
+    -- Known food items (examples; extend as needed)
+    FOOD = {
+        [4540] = 10, -- Tough Hunk of Bread
+        [4541] = 20, -- Freshly Baked Bread
+        [4542] = 30, -- Moist Cornbread
+        [117]  = 8,  -- Tough Jerky
+        [2287] = 12, -- Haunch of Meat
+        [4592] = 15, -- Longjaw Mud Snapper
+    },
+
+    DEBUG = false,
+}
+
+--[[ Internal State ]]--
+local STATE = {
+    byGuid = {}, -- guidLow -> { value:number, stage:string|nil, lastPos={map,x,y,z}, nextSave=0 }
+}
 
 --[[ Eluna Event Constants ]]--
--- Eluna does not automatically export these constants; define what we need.
 local PLAYER_EVENT_ON_LOGIN = 3
+local PLAYER_EVENT_ON_LOGOUT = 4
+local PLAYER_EVENT_ON_SAVE = 25
+local PLAYER_EVENT_ON_FIRST_LOGIN = 30
+local PLAYER_EVENT_ON_COMMAND = 42
 
---[[
-    Function: Survival_OnPlayerLogin
-    Hook: PLAYER_EVENT_ON_LOGIN
-    Purpose: Initializes a player's hunger value to the maximum when they first
-             log in or if the data is missing.
-]]--
-local function Survival_OnPlayerLogin(event, player)
-    if player:GetData(HUNGER_DATA_KEY) == nil then
-        player:SetData(HUNGER_DATA_KEY, MAX_HUNGER)
-        print(("[Outland] Initialized hunger for player %s."):format(player:GetName()))
+local ITEM_EVENT_ON_USE = 2
+
+--[[ DB Helpers ]]--
+local function EnsureTable()
+    CharDBExecute([[ 
+        CREATE TABLE IF NOT EXISTS character_hunger (
+            guid INT UNSIGNED PRIMARY KEY,
+            hunger TINYINT UNSIGNED NOT NULL DEFAULT 100,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ]])
+end
+
+local function now()
+    return GetGameTime() -- seconds
+end
+
+local function clamp(x, lo, hi)
+    if x < lo then return lo end
+    if x > hi then return hi end
+    return x
+end
+
+local function loadHunger(player)
+    local guid = player:GetGUIDLow()
+    local s = STATE.byGuid[guid]
+    if s then return s end
+
+    local q = CharDBQuery("SELECT hunger, UNIX_TIMESTAMP(updated_at) FROM character_hunger WHERE guid=" .. guid)
+    local value = Hunger.START
+    local last = now()
+    if q then
+        value = q:GetUInt32(0)
+        local updated_at = q:GetUInt32(1)
+        if Hunger.OFFLINE_DECAY_PER_HOUR and Hunger.OFFLINE_DECAY_PER_HOUR > 0 then
+            local hours = math.floor(math.max(0, now() - updated_at) / 3600)
+            if hours > 0 then
+                value = clamp(value - Hunger.OFFLINE_DECAY_PER_HOUR * hours, 0, Hunger.MAX)
+            end
+        end
+    else
+        CharDBExecute("INSERT INTO character_hunger (guid, hunger) VALUES (" .. guid .. "," .. Hunger.START .. ")")
+    end
+
+    s = { value = value, stage = nil, lastPos = { player:GetMapId(), player:GetX(), player:GetY(), player:GetZ() }, nextSave = now() + 30 }
+    STATE.byGuid[guid] = s
+    return s
+end
+
+local function saveHunger(player, force)
+    local guid = player:GetGUIDLow()
+    local s = STATE.byGuid[guid]
+    if not s then return end
+    if not force and now() < (s.nextSave or 0) then return end
+    local v = math.floor(clamp(s.value, 0, Hunger.MAX))
+    CharDBExecute("UPDATE character_hunger SET hunger=" .. v .. " WHERE guid=" .. guid)
+    s.nextSave = now() + 30
+end
+
+--[[ Effects ]]--
+local function removeAllThresholdAuras(player)
+    for _, spellId in pairs(Hunger.SPELLS) do
+        if spellId then player:RemoveAura(spellId) end
     end
 end
 
---[[
-    Function: Survival_HungerTick
-    Purpose: This is the core logic for a single player's hunger drain.
-             It's called by the main update loop.
-]]--
-local function Survival_HungerTick(player)
-    local currentHunger = player:GetData(HUNGER_DATA_KEY) or MAX_HUNGER
+local function applyStage(player, s)
+    local t = Hunger.THRESHOLDS
+    local v = s.value
+    local newStage = nil
+    if v <= t.starving then newStage = "starving"
+    elseif v <= t.hungry then newStage = "hungry"
+    elseif v <= t.peckish then newStage = "peckish"
+    else newStage = nil end
 
-    -- Calculate the new hunger value, ensuring it doesn't go below zero.
-    local newHunger = math.max(0, currentHunger - HUNGER_PER_TICK)
-
-    player:SetData(HUNGER_DATA_KEY, newHunger)
-
-    -- For testing, send a message to the player so we can see it working.
-    player:SendBroadcastMessage(("[DEBUG] Your hunger is now %d/%d."):format(newHunger, MAX_HUNGER))
-end
-
---[[
-    Function: Survival_MainUpdate
-    Purpose: This is the "heartbeat" of our survival system. It runs on a timer,
-             gets all online players, and applies the hunger tick to each one.
-]]--
-local function Survival_MainUpdate()
-    local onlinePlayers = GetPlayersInWorld()
-    for _, player in ipairs(onlinePlayers) do
-        -- Ensure the player is valid and in the world before ticking.
-        if player and player:IsInWorld() then
-            Survival_HungerTick(player)
+    if newStage ~= s.stage then
+        -- stage changed
+        s.stage = newStage
+        removeAllThresholdAuras(player)
+        if newStage and Hunger.SPELLS[newStage] then
+            player:AddAura(Hunger.SPELLS[newStage], player)
+        end
+        if newStage and Hunger.MESSAGES[newStage] then
+            player:SendBroadcastMessage(Hunger.MESSAGES[newStage])
+        end
+        -- Optional speed penalty at starving
+        if Hunger.SPEED_PENALTY.enabled then
+            if newStage == "starving" then
+                -- Movement type 1 = run, 0 = walk (common in Eluna)
+                player:SetSpeedRate(1, Hunger.SPEED_PENALTY.starving)
+            else
+                player:SetSpeedRate(1, 1.0)
+            end
         end
     end
 end
 
---[[ Event Registration ]]--
--- We register our functions to be called by the server's events.
+--[[ Rate Computation ]]--
+local function distance2(ax, ay, az, bx, by, bz)
+    local dx, dy, dz = ax - bx, ay - by, az - bz
+    return dx * dx + dy * dy + dz * dz
+end
 
-RegisterPlayerEvent(PLAYER_EVENT_ON_LOGIN, Survival_OnPlayerLogin)
-CreateLuaEvent(Survival_MainUpdate, TICK_INTERVAL_SECONDS * 1000, 0)
+local function isMoving(player, s)
+    local map, x, y, z = player:GetMapId(), player:GetX(), player:GetY(), player:GetZ()
+    local lp = s.lastPos
+    local moved = (lp[1] ~= map) or distance2(lp[2], lp[3], lp[4], x, y, z) > 1.0
+    s.lastPos = { map, x, y, z }
+    return moved
+end
 
-print("== [Outland] Core Survival System Loaded ==")
+local function gated(player)
+    if Hunger.GATES.disableWhileGhost and player:IsDead() then
+        return true
+    end
+    if Hunger.GATES.disableInFlight and player:IsInFlight() then return true end
+    if Hunger.GATES.disableInArena and player:IsInArena() then return true end
+    if Hunger.GATES.disableInBG and player:IsInBattleground() then return true end
+    return false
+end
+
+local function tickPlayer(player)
+    local s = loadHunger(player)
+    if gated(player) then
+        -- While gated, ensure no auras from hunger
+        removeAllThresholdAuras(player)
+        return
+    end
+
+    local rate = Hunger.RATES.base
+
+    if isMoving(player, s) then rate = rate + Hunger.RATES.moving end
+    if player:IsInCombat() then rate = rate + Hunger.RATES.combat end
+    if player:IsResting() then
+        rate = rate + Hunger.RATES.resting
+        if rate < Hunger.RATES.REST_MIN then rate = Hunger.RATES.REST_MIN end
+    end
+
+    s.value = clamp(s.value - rate, 0, Hunger.MAX)
+    applyStage(player, s)
+    saveHunger(player, false)
+
+    if Hunger.DEBUG and math.random(1, 20) == 1 then
+        player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+    end
+end
+
+--[[ Food Handling ]]--
+local function onFoodUse(event, player, item, target)
+    local entry = item:GetEntry()
+    local amount = Hunger.FOOD[entry]
+    if not amount then return end
+    local s = loadHunger(player)
+    local before = s.value
+    s.value = clamp(s.value + amount, 0, Hunger.MAX)
+    applyStage(player, s)
+    saveHunger(player, true)
+    player:SendBroadcastMessage(Hunger.MESSAGES.restored(math.floor(s.value - before)))
+end
+
+local function registerFoodHandlers()
+    for entry, _ in pairs(Hunger.FOOD) do
+        RegisterItemEvent(entry, ITEM_EVENT_ON_USE, onFoodUse)
+    end
+end
+
+--[[ Commands ]]--
+local function onCommand(event, player, command, chatHandler)
+    if not command then return end
+    local msg = command:lower()
+    if msg == "hunger" or msg:match("^hunger%s") then
+        local s = loadHunger(player)
+        if msg:match("^hunger%s+set%s+%d+") and player:IsGM() then
+            local set = tonumber(msg:match("set%s+(%d+)"))
+            if set then
+                s.value = clamp(set, 0, Hunger.MAX)
+                applyStage(player, s)
+                saveHunger(player, true)
+                player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+            end
+        elseif msg:match("^hunger%s+add%s+%d+") and player:IsGM() then
+            local add = tonumber(msg:match("add%s+(%d+)"))
+            if add then
+                s.value = clamp(s.value + add, 0, Hunger.MAX)
+                applyStage(player, s)
+                saveHunger(player, true)
+                player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+            end
+        elseif msg:match("^hunger%s+reset") and player:IsGM() then
+            s.value = Hunger.START
+            applyStage(player, s)
+            saveHunger(player, true)
+            player:SendBroadcastMessage("[GM] Hunger reset.")
+        else
+            player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+        end
+        return false -- consume the command
+    end
+end
+
+--[[ Player Lifecycle ]]--
+local function onLogin(event, player)
+    loadHunger(player)
+end
+
+local function onFirstLogin(event, player)
+    local guid = player:GetGUIDLow()
+    local start = Hunger.START
+    CharDBExecute("INSERT IGNORE INTO character_hunger (guid, hunger) VALUES (" .. guid .. "," .. start .. ")")
+    STATE.byGuid[guid] = { value = start, stage = nil, lastPos = { player:GetMapId(), player:GetX(), player:GetY(), player:GetZ() }, nextSave = now() + 30 }
+end
+
+local function onLogout(event, player)
+    saveHunger(player, true)
+    STATE.byGuid[player:GetGUIDLow()] = nil
+end
+
+local function onSave(event, player)
+    saveHunger(player, true)
+end
+
+--[[ Scheduler ]]--
+local function mainTick()
+    if not Hunger.ENABLED then return end
+    local players = GetPlayersInWorld()
+    for _, player in ipairs(players) do
+        if player and player:IsInWorld() then
+            tickPlayer(player)
+        end
+    end
+end
+
+--[[ Bootstrap ]]--
+EnsureTable()
+registerFoodHandlers()
+RegisterPlayerEvent(PLAYER_EVENT_ON_LOGIN, onLogin)
+RegisterPlayerEvent(PLAYER_EVENT_ON_FIRST_LOGIN, onFirstLogin)
+RegisterPlayerEvent(PLAYER_EVENT_ON_LOGOUT, onLogout)
+RegisterPlayerEvent(PLAYER_EVENT_ON_SAVE, onSave)
+RegisterPlayerEvent(PLAYER_EVENT_ON_COMMAND, onCommand)
+CreateLuaEvent(mainTick, Hunger.TICK_MS, 0)
+
+print("== [Outland] Hunger System (Phase 1) Loaded ==")
