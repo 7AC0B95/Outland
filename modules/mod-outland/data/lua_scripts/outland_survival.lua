@@ -36,10 +36,12 @@ local Hunger = {
     },
 
     -- Optional auras to apply at thresholds (set to nil to disable)
+    -- Note: Uses real spell IDs; validated via GetSpellInfo before applying.
+    APPLY_AURAS = true, -- set true to enable aura application
     SPELLS = {
-        peckish = nil,
-        hungry = nil,
-        starving = nil,
+        peckish = nil,   -- e.g., a harmless visual aura (left nil by default)
+        hungry = nil,    -- e.g., a mild debuff (left nil by default)
+        starving = 1604, -- Dazed (movement slow) — caution: strong effect
     },
 
     -- Optional movement speed penalty at starving (applies to run walk movement)
@@ -151,9 +153,15 @@ local function saveHunger(player, force)
 end
 
 --[[ Effects ]]--
+local function spellExists(id)
+    if not id then return false end
+    local info = GetSpellInfo and GetSpellInfo(id)
+    return info ~= nil
+end
+
 local function removeAllThresholdAuras(player)
     for _, spellId in pairs(Hunger.SPELLS) do
-        if spellId then player:RemoveAura(spellId) end
+        if spellId and spellExists(spellId) then player:RemoveAura(spellId) end
     end
 end
 
@@ -170,7 +178,7 @@ local function applyStage(player, s)
         -- stage changed
         s.stage = newStage
         removeAllThresholdAuras(player)
-        if newStage and Hunger.SPELLS[newStage] then
+        if Hunger.APPLY_AURAS and newStage and Hunger.SPELLS[newStage] and spellExists(Hunger.SPELLS[newStage]) then
             player:AddAura(Hunger.SPELLS[newStage], player)
         end
         if newStage and Hunger.MESSAGES[newStage] then
