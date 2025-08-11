@@ -181,7 +181,7 @@ local function applyStage(player, s)
         if Hunger.APPLY_AURAS and newStage and Hunger.SPELLS[newStage] and spellExists(Hunger.SPELLS[newStage]) then
             player:AddAura(Hunger.SPELLS[newStage], player)
         end
-        if newStage and Hunger.MESSAGES[newStage] then
+        if newStage and Hunger.MESSAGES[newStage] and player.SendBroadcastMessage then
             player:SendBroadcastMessage(Hunger.MESSAGES[newStage])
         end
         -- Optional speed penalty at starving
@@ -211,12 +211,12 @@ local function isMoving(player, s)
 end
 
 local function gated(player)
-    if Hunger.GATES.disableWhileGhost and player:IsDead() then
+    if Hunger.GATES.disableWhileGhost and player.IsDead and player:IsDead() then
         return true
     end
-    if Hunger.GATES.disableInFlight and player:IsInFlight() then return true end
-    if Hunger.GATES.disableInArena and player:IsInArena() then return true end
-    if Hunger.GATES.disableInBG and player:IsInBattleground() then return true end
+    if Hunger.GATES.disableInFlight and player.IsTaxiFlying and player:IsTaxiFlying() then return true end
+    if Hunger.GATES.disableInArena and player.IsInArena and player:IsInArena() then return true end
+    if Hunger.GATES.disableInBG and player.IsInBattleground and player:IsInBattleground() then return true end
     return false
 end
 
@@ -231,8 +231,8 @@ local function tickPlayer(player)
     local rate = Hunger.RATES.base
 
     if isMoving(player, s) then rate = rate + Hunger.RATES.moving end
-    if player:IsInCombat() then rate = rate + Hunger.RATES.combat end
-    if player:IsResting() then
+    if player.IsInCombat and player:IsInCombat() then rate = rate + Hunger.RATES.combat end
+    if player.IsResting and player:IsResting() then
         rate = rate + Hunger.RATES.resting
         if rate < Hunger.RATES.REST_MIN then rate = Hunger.RATES.REST_MIN end
     end
@@ -242,7 +242,9 @@ local function tickPlayer(player)
     saveHunger(player, false)
 
     if Hunger.DEBUG and math.random(1, 20) == 1 then
-        player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+        if player.SendBroadcastMessage then
+            player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+        end
     end
 end
 
@@ -256,7 +258,9 @@ local function onFoodUse(event, player, item, target)
     s.value = clamp(s.value + amount, 0, Hunger.MAX)
     applyStage(player, s)
     saveHunger(player, true)
-    player:SendBroadcastMessage(Hunger.MESSAGES.restored(math.floor(s.value - before)))
+    if player.SendBroadcastMessage then
+        player:SendBroadcastMessage(Hunger.MESSAGES.restored(math.floor(s.value - before)))
+    end
 end
 
 local function registerFoodHandlers()
@@ -271,29 +275,38 @@ local function onCommand(event, player, command, chatHandler)
     local msg = command:lower()
     if msg == "hunger" or msg:match("^hunger%s") then
         local s = loadHunger(player)
-        if msg:match("^hunger%s+set%s+%d+") and player:IsGM() then
+        local isGM = player.IsGM and player:IsGM()
+        if msg:match("^hunger%s+set%s+%d+") and isGM then
             local set = tonumber(msg:match("set%s+(%d+)"))
             if set then
                 s.value = clamp(set, 0, Hunger.MAX)
                 applyStage(player, s)
                 saveHunger(player, true)
-                player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+                if player.SendBroadcastMessage then
+                    player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+                end
             end
-        elseif msg:match("^hunger%s+add%s+%d+") and player:IsGM() then
+        elseif msg:match("^hunger%s+add%s+%d+") and isGM then
             local add = tonumber(msg:match("add%s+(%d+)"))
             if add then
                 s.value = clamp(s.value + add, 0, Hunger.MAX)
                 applyStage(player, s)
                 saveHunger(player, true)
-                player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+                if player.SendBroadcastMessage then
+                    player:SendBroadcastMessage("[GM] " .. Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+                end
             end
-        elseif msg:match("^hunger%s+reset") and player:IsGM() then
+        elseif msg:match("^hunger%s+reset") and isGM then
             s.value = Hunger.START
             applyStage(player, s)
             saveHunger(player, true)
-            player:SendBroadcastMessage("[GM] Hunger reset.")
+            if player.SendBroadcastMessage then
+                player:SendBroadcastMessage("[GM] Hunger reset.")
+            end
         else
-            player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+            if player.SendBroadcastMessage then
+                player:SendBroadcastMessage(Hunger.MESSAGES.show(math.floor(s.value), Hunger.MAX))
+            end
         end
         return false -- consume the command
     end
@@ -325,7 +338,7 @@ local function mainTick()
     if not Hunger.ENABLED then return end
     local players = GetPlayersInWorld()
     for _, player in ipairs(players) do
-        if player and player:IsInWorld() then
+        if player and player.IsInWorld and player:IsInWorld() then
             tickPlayer(player)
         end
     end
