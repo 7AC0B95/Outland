@@ -26,9 +26,4 @@ set(MOD_OUTLAND_LUA_SCRIPTS
     ${MOD_OUTLAND_ROOT}/data/lua_scripts/outland_survival.lua
 )
 
-foreach(MOD_OUTLAND_LUA_SCRIPT ${MOD_OUTLAND_LUA_SCRIPTS})
-    get_filename_component(MOD_OUTLAND_LUA_SCRIPT_NAME ${MOD_OUTLAND_LUA_SCRIPT} NAME)
-    add_custom_command(TARGET modules POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MOD_OUTLAND_LUA_SCRIPT} "${CMAKE_BINARY_DIR}/bin/lua_scripts/${MOD_OUTLAND_LUA_SCRIPT_NAME}"
-    )
-endforeach()
+# Lua script copy handled in modules/mod-outland/mod-outland.cmake after target 'modules' exists
