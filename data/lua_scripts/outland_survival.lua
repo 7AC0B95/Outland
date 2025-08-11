@@ -48,7 +48,7 @@ end
              gets all online players, and applies the hunger tick to each one.
 ]]--
 local function Survival_MainUpdate()
-    local onlinePlayers = GetPlayers()
+    local onlinePlayers = GetPlayersInWorld()
     for _, player in ipairs(onlinePlayers) do
         -- Ensure the player is valid and in the world before ticking.
         if player and player:IsInWorld() then
