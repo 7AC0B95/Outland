@@ -12,6 +12,10 @@ local HUNGER_PER_TICK = 1         -- How much hunger is lost per tick.
 local MAX_HUNGER = 100            -- The maximum hunger a player can have.
 local HUNGER_DATA_KEY = "outland_hunger" -- The key for storing player data.
 
+--[[ Eluna Event Constants ]]--
+-- Eluna does not automatically export these constants; define what we need.
+local PLAYER_EVENT_ON_LOGIN = 3
+
 --[[
     Function: Survival_OnPlayerLogin
     Hook: PLAYER_EVENT_ON_LOGIN
@@ -61,6 +65,6 @@ end
 -- We register our functions to be called by the server's events.
 
 RegisterPlayerEvent(PLAYER_EVENT_ON_LOGIN, Survival_OnPlayerLogin)
-CreateRepeaterEvent(Survival_MainUpdate, TICK_INTERVAL_SECONDS * 1000, 0)
+CreateLuaEvent(Survival_MainUpdate, TICK_INTERVAL_SECONDS * 1000, 0)
 
 print("== [Outland] Core Survival System Loaded ==")

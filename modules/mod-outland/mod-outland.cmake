@@ -1,7 +1,10 @@
 # Extra configuration for mod-outland executed after target 'modules' exists
 
-# Locate this module's source directory
-GetPathToModuleSource(${SOURCE_MODULE} MOD_OUTLAND_MODULE_ROOT)
+# Locate this module's root directory (not the src subdir)
+# GetPathToModuleSource returns the "src" folder, which is not what we want here.
+# Use the modules base path and append the module name to get the module root.
+GetModulesBasePath(MOD_OUTLAND_MODULES_BASE)
+set(MOD_OUTLAND_MODULE_ROOT "${MOD_OUTLAND_MODULES_BASE}/${SOURCE_MODULE}")
 
 set(MOD_OUTLAND_LUA_DIR "${MOD_OUTLAND_MODULE_ROOT}/data/lua_scripts")
 
