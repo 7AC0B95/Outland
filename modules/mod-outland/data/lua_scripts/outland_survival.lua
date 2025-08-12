@@ -1,6 +1,6 @@
 --
 --  Outland Hunger System (Phase 1)
---  - Per-character persistent hunger with offline decay (optional)
+--  - Persistent hunger with offline decay (optional)
 --  - Context-aware drain (idle/moving/combat/resting) and gates (BG/Arena/flight/ghost)
 --  - Threshold messaging and optional auras
 --  - Basic food consumption hooks for common food items
@@ -44,8 +44,8 @@ local Hunger = {
         starving = 1604, -- Dazed (movement slow) — caution: strong effect
     },
 
-    -- Optional movement speed penalty at starving (applies to run walk movement)
-    SPEED_PENALTY = { enabled = false, starving = 0.85 }, -- 85% of normal
+    -- While starving, periodically reapply (pulse) the starving aura to refresh effect.
+    STARVING_PULSE_INTERVAL = 20, -- seconds (set to 0 to disable pulsing)
 
     -- Context gates
     GATES = {
@@ -85,6 +85,14 @@ local Hunger = {
 local STATE = {
     byGuid = {}, -- guidLow -> { value:number, stage:string|nil, lastPos={map,x,y,z}, nextSave=0 }
 }
+
+--[[ Debug helper ]]--
+local function dbg(player, fmt, ...)
+    if not Hunger.DEBUG then return end
+    if player and player.SendBroadcastMessage then
+        player:SendBroadcastMessage(("[Hunger][DEBUG] " .. fmt):format(...))
+    end
+end
 
 --[[ Eluna Event Constants ]]--
 local PLAYER_EVENT_ON_LOGIN = 3
@@ -178,20 +186,13 @@ local function applyStage(player, s)
         -- stage changed
         s.stage = newStage
         removeAllThresholdAuras(player)
+        local starvingAuraActive = false
         if Hunger.APPLY_AURAS and newStage and Hunger.SPELLS[newStage] and spellExists(Hunger.SPELLS[newStage]) then
             player:AddAura(Hunger.SPELLS[newStage], player)
+            if newStage == "starving" then starvingAuraActive = true end
         end
         if newStage and Hunger.MESSAGES[newStage] and player.SendBroadcastMessage then
             player:SendBroadcastMessage(Hunger.MESSAGES[newStage])
-        end
-        -- Optional speed penalty at starving
-        if Hunger.SPEED_PENALTY.enabled then
-            if newStage == "starving" then
-                -- Movement type 1 = run, 0 = walk (common in Eluna)
-                player:SetSpeedRate(1, Hunger.SPEED_PENALTY.starving)
-            else
-                player:SetSpeedRate(1, 1.0)
-            end
         end
     end
 end
@@ -239,6 +240,19 @@ local function tickPlayer(player)
 
     s.value = clamp(s.value - rate, 0, Hunger.MAX)
     applyStage(player, s)
+    -- Periodic starving pulse (recast aura) if configured
+    if s.stage == "starving" and Hunger.APPLY_AURAS and Hunger.SPELLS.starving and Hunger.STARVING_PULSE_INTERVAL and Hunger.STARVING_PULSE_INTERVAL > 0 then
+        local spellId = Hunger.SPELLS.starving
+        if spellExists(spellId) then
+            local nowSec = now()
+            if not s.nextStarvePulse or nowSec >= s.nextStarvePulse then
+                -- Recast: remove then add to force refresh/visual
+                if player.RemoveAura then player:RemoveAura(spellId) end
+                player:AddAura(spellId, player)
+                s.nextStarvePulse = nowSec + Hunger.STARVING_PULSE_INTERVAL
+            end
+        end
+    end
     saveHunger(player, false)
 
     if Hunger.DEBUG and math.random(1, 20) == 1 then
