@@ -19,6 +19,7 @@ set(MOD_OUTLAND_SOURCES
 set(MOD_OUTLAND_WORLD_SQL
     ${MOD_OUTLAND_ROOT}/data/sql/db-world/001_outland_initial_spawn_settings.sql
     ${MOD_OUTLAND_ROOT}/data/sql/db-world/002_outland_clean_world_spawns.sql
+    ${MOD_OUTLAND_ROOT}/data/sql/db-world/003_outland_famished_spell.sql
 )
 
 # --- Lua Scripts ---

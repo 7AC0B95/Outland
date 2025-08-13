@@ -32,6 +32,7 @@ local Hunger = {
     THRESHOLDS = {
         peckish = 70,
         hungry = 40,
+        famished = 25, -- new stage: applies regen penalty
         starving = 15,
     },
 
@@ -41,6 +42,12 @@ local Hunger = {
     SPELLS = {
         peckish = nil,   -- e.g., a harmless visual aura (left nil by default)
         hungry = nil,    -- e.g., a mild debuff (left nil by default)
+        -- Custom debuff: "Famished" (-25% Health & Mana regeneration)
+        -- Create a custom spell (e.g., ID 90001) with:
+        --   - Effect 0: SPELL_AURA_MOD_HEALTH_REGEN_PERCENT, Amount = -25
+        --   - Effect 1: SPELL_AURA_MOD_POWER_REGEN_PERCENT (MiscValue = POWER_MANA), Amount = -25
+        -- If the spell does not exist client-side, this will safely no-op due to GetSpellInfo check.
+        famished = 90001,
         starving = 1604, -- Dazed (movement slow) — caution: strong effect
     },
 
@@ -59,6 +66,7 @@ local Hunger = {
     MESSAGES = {
         peckish = "You feel a bit peckish.",
         hungry = "You're getting hungry.",
+        famished = "Your body is conserving energy due to lack of food. Health and mana regenerate 25% slower.",
         starving = "You're starving! Find food soon.",
         restored = function(amount)
             return ("You eat and restore %d hunger."):format(amount)
@@ -178,6 +186,7 @@ local function applyStage(player, s)
     local v = s.value
     local newStage = nil
     if v <= t.starving then newStage = "starving"
+    elseif v <= (t.famished or -1) then newStage = "famished"
     elseif v <= t.hungry then newStage = "hungry"
     elseif v <= t.peckish then newStage = "peckish"
     else newStage = nil end
